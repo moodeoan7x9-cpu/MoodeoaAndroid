@@ -23,9 +23,10 @@ jobs:
         run: |
           if [ -f "MoodeoaAndroid-Beta.zip" ]; then
             unzip -o MoodeoaAndroid-Beta.zip -d extracted
-            ROOT_DIR=$(find extracted -name "settings.gradle*" -o -name "build.gradle" | head -n 1 | xargs dirname)
-            echo "Copying files from: $ROOT_DIR"
-            cp -r $ROOT_DIR/. .
+            # Find directory containing settings.gradle and copy ALL contents including hidden files
+            TARGET=$(find extracted -name "settings.gradle*" -exec dirname {} \;)
+            echo "Moving files from $TARGET"
+            cp -r $TARGET/. .
           fi
 
       - name: Setup Gradle Wrapper
