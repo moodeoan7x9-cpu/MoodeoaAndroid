@@ -23,7 +23,6 @@ jobs:
         run: |
           if [ -f "MoodeoaAndroid-Beta.zip" ]; then
             unzip -o MoodeoaAndroid-Beta.zip -d extracted
-            # Find directory containing settings.gradle and copy ALL contents including hidden files
             TARGET=$(find extracted -name "settings.gradle*" -exec dirname {} \;)
             echo "Moving files from $TARGET"
             cp -r $TARGET/. .
@@ -36,7 +35,7 @@ jobs:
         run: chmod +x gradlew
 
       - name: Build APK with Gradle
-        run: ./gradlew assembleDebug --stacktrace
+        run: ./gradlew assembleDebug -Dorg.gradle.java.home=$JAVA_HOME -Dkotlin.compiler.jvmTarget=1.8 --stacktrace
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
