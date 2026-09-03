@@ -23,9 +23,9 @@ jobs:
         run: |
           if [ -f "MoodeoaAndroid-Beta.zip" ]; then
             unzip -o MoodeoaAndroid-Beta.zip -d extracted
-            TARGET_DIR=$(find extracted -name "settings.gradle*" -o -name "build.gradle*" | head -n 1 | xargs dirname)
-            echo "Project root found at: $TARGET_DIR"
-            cp -r $TARGET_DIR/* .
+            ROOT_DIR=$(find extracted -name "settings.gradle*" -o -name "build.gradle" | head -n 1 | xargs dirname)
+            echo "Copying files from: $ROOT_DIR"
+            cp -r $ROOT_DIR/. .
           fi
 
       - name: Setup Gradle Wrapper
