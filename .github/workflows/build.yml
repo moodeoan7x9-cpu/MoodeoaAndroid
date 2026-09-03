@@ -19,15 +19,22 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: Unzip Project if ZIP exists
+      - name: Extract Project Files
         run: |
           if [ -f "MoodeoaAndroid-Beta.zip" ]; then
-            unzip -o MoodeoaAndroid-Beta.zip -d extracted_project
-            cp -r extracted_project/* .
+            unzip -o MoodeoaAndroid-Beta.zip -d extracted
+            find extracted -maxdepth 2 -name "build.gradle" -exec dirname {} \; | head -n 1 > project_dir.txt
+            PROJ_DIR=$(cat project_dir.txt)
+            if [ -n "$PROJ_DIR" ]; then
+              cp -r $PROJ_DIR/* .
+            fi
           fi
 
+      - name: Setup Gradle Wrapper
+        run: gradle wrapper
+
       - name: Grant Execute Permission for Gradle
-        run: chmod +x gradlew || true
+        run: chmod +x gradlew
 
       - name: Build APK with Gradle
         run: ./gradlew assembleDebug --stacktrace
