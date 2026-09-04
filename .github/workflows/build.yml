@@ -1,8 +1,8 @@
-name: Build Android APK
+name: Build Moodeoa Smart APK
 
 on:
   push:
-    branches: [ "main", "master" ]
+    branches: ["main", "master"]
   workflow_dispatch:
 
 jobs:
@@ -18,32 +18,156 @@ jobs:
         with:
           java-version: '17'
           distribution: 'temurin'
+          cache: gradle
 
-      - name: Extract Project Files
+      - name: Extract Project
+        shell: bash
         run: |
-          if [ -f "MoodeoaAndroid-Beta.zip" ]; then
-            unzip -o MoodeoaAndroid-Beta.zip -d extracted
-            TARGET=$(find extracted -name "settings.gradle*" -exec dirname {} \;)
-            echo "Moving files from $TARGET"
-            cp -r $TARGET/. .
+          set -e
+
+          ZIP=$(find . -type f -name "MoodeoaAndroid-Beta.zip" | head -n 1)
+
+          if [ -z "$ZIP" ]; then
+            echo "ERROR: MoodeoaAndroid-Beta.zip not found"
+            exit 1
           fi
 
-      - name: Patch Java and Kotlin Targets
+          mkdir -p android-project
+          unzip -o "$ZIP" -d android-project
+
+          echo "Project files:"
+          find android-project -maxdepth 4 -type f | sort
+
+      - name: Find Android Project
+        shell: bash
         run: |
-          find . -name "build.gradle*" -exec sed -i 's/1.8/17/g' {} +
-          find . -name "build.gradle*" -exec sed -i 's/"1.8"/"17"/g' {} +
+          set -e
 
-      - name: Setup Gradle Wrapper
-        run: gradle wrapper
+          SETTINGS=$(find android-project -type f \( \
+            -name "settings.gradle" -o \
+            -name "settings.gradle.kts" \
+          \) | head -n 1)
 
-      - name: Grant Execute Permission for Gradle
-        run: chmod +x gradlew
+          if [ -z "$SETTINGS" ]; then
+            echo "ERROR: Gradle project not found"
+            exit 1
+          fi
 
-      - name: Build APK with Gradle
-        run: ./gradlew assembleDebug -Pkotlin.compiler.jvmTarget=17 -Dorg.gradle.java.home=$JAVA_HOME --stacktrace
+          PROJECT_DIR=$(dirname "$SETTINGS")
 
-      - name: Upload APK Artifact
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+
+          echo "Android project:"
+          echo "$PROJECT_DIR"
+
+      - name: Force Java 17
+        shell: bash
+        run: |
+          cat > "$PROJECT_DIR/force-java.gradle" <<'EOF'
+          allprojects {
+              tasks.withType(JavaCompile).configureEach {
+                  sourceCompatibility = "17"
+                  targetCompatibility = "17"
+              }
+          }
+          EOF
+
+      - name: Patch Android Gradle Settings
+        shell: bash
+        run: |
+          set -e
+
+          BUILD_FILE="$PROJECT_DIR/app/build.gradle"
+
+          if [ ! -f "$BUILD_FILE" ]; then
+            echo "ERROR: app/build.gradle not found"
+            exit 1
+          fi
+
+          python3 - "$BUILD_FILE" <<'PY'
+          import sys
+
+          path = sys.argv[1]
+
+          with open(path, "r", encoding="utf-8") as f:
+              text = f.read()
+
+          # Java 17
+          text = text.replace(
+              "JavaVersion.VERSION_1_8",
+              "JavaVersion.VERSION_17"
+          )
+
+          text = text.replace(
+              "JavaVersion.VERSION_11",
+              "JavaVersion.VERSION_17"
+          )
+
+          # Kotlin JVM 17
+          text = text.replace(
+              'jvmTarget = "1.8"',
+              'jvmTarget = "17"'
+          )
+
+          text = text.replace(
+              "jvmTarget = '1.8'",
+              "jvmTarget = '17'"
+          )
+
+          # Add compile options if missing
+          if "compileOptions" not in text and "android {" in text:
+              text = text.replace(
+                  "android {",
+                  """android {
+
+              compileOptions {
+                  sourceCompatibility JavaVersion.VERSION_17
+                  targetCompatibility JavaVersion.VERSION_17
+              }
+          """,
+                  1
+              )
+
+          # Add Kotlin options if missing
+          if "kotlinOptions" not in text:
+              text += """
+
+          // Force Kotlin JVM target to Java 17
+          tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile).configureEach {
+              kotlinOptions {
+                  jvmTarget = "17"
+              }
+          }
+          """
+
+          with open(path, "w", encoding="utf-8") as f:
+              f.write(text)
+
+          print("Java/Kotlin JVM target configured for Java 17.")
+          PY
+
+      - name: Grant Gradle Permission
+        shell: bash
+        run: |
+          chmod +x "$PROJECT_DIR/gradlew"
+
+      - name: Build APK
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          ./gradlew clean assembleDebug \
+            --no-daemon \
+            --stacktrace
+
+      - name: Show APK
+        shell: bash
+        run: |
+          echo "===== APK FILES ====="
+          find "$PROJECT_DIR/app/build/outputs/apk" \
+            -type f -name "*.apk" -print
+
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Moodeoa-Smart-App
-          path: app/build/outputs/apk/debug/app-debug.apk
+          name: Moodeoa-Smart-APK
+          path: ${{ env.PROJECT_DIR }}/app/build/outputs/apk/**/*.apk
+          if-no-files-found: error
