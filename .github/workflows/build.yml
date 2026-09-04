@@ -12,6 +12,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+
       - name: Checkout repository
         uses: actions/checkout@v4
 
@@ -29,29 +30,30 @@ jobs:
           ZIP_FILE=$(find . -type f -name "MoodeoaAndroid-Beta.zip" | head -n 1)
 
           if [ -z "$ZIP_FILE" ]; then
-            echo "ERROR: MoodeoaAndroid-Beta.zip was not found."
+            echo "ERROR: MoodeoaAndroid-Beta.zip not found"
             exit 1
           fi
 
-          echo "Found ZIP: $ZIP_FILE"
+          echo "Found ZIP:"
+          echo "$ZIP_FILE"
 
           mkdir -p android-project
           unzip -o "$ZIP_FILE" -d android-project
 
-          echo "Extracted project:"
-          find android-project -maxdepth 4 -type f | sort
+          echo "Extracted files:"
+          find android-project -maxdepth 5 -type f | sort
 
-      - name: Find Gradle project
+      - name: Find Android project
         shell: bash
         run: |
           set -e
 
           SETTINGS_FILE=$(find android-project -type f \
-            \( -name "settings.gradle" -o -name "settings.gradle.kts" \) \
+            -name "settings.gradle" -o -name "settings.gradle.kts" \
             | head -n 1)
 
           if [ -z "$SETTINGS_FILE" ]; then
-            echo "ERROR: settings.gradle was not found."
+            echo "ERROR: settings.gradle not found"
             exit 1
           fi
 
@@ -59,47 +61,123 @@ jobs:
 
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
 
-          echo "Android project found at:"
+          echo "Android project found:"
           echo "$PROJECT_DIR"
 
-      - name: Create JVM compatibility configuration
-        shell: bash
-        run: |
-          cat > "$PROJECT_DIR/force-jvm.gradle" <<'EOF'
-          allprojects {
-              tasks.withType(JavaCompile).configureEach {
-                  sourceCompatibility = "17"
-                  targetCompatibility = "17"
-              }
-
-              tasks.configureEach { task ->
-                  if (task.name.toLowerCase().contains("kotlin")) {
-                      try {
-                          task.kotlinOptions.jvmTarget = "17"
-                      } catch (Exception ignored) {
-                      }
-                  }
-              }
-          }
-          EOF
-
-      - name: Prepare Gradle
+      - name: Set Gradle version to 8.9
         shell: bash
         working-directory: ${{ env.PROJECT_DIR }}
         run: |
           set -e
 
-          if [ -f "./gradlew" ]; then
-            chmod +x ./gradlew
-            echo "Gradle wrapper found."
+          if [ -f "gradle/wrapper/gradle-wrapper.properties" ]; then
+
+            sed -i -E \
+              's#gradle-[0-9]+\.[0-9]+(\.[0-9]+)?-(all|bin)\.zip#gradle-8.9-all.zip#g' \
+              gradle/wrapper/gradle-wrapper.properties
+
           else
-            echo "Gradle wrapper not found."
-            echo "Creating Gradle wrapper..."
 
-            gradle wrapper --gradle-version 8.7
+            echo "Gradle wrapper properties not found."
+            echo "Creating Gradle wrapper using Gradle 8.9."
 
-            chmod +x ./gradlew
+            gradle wrapper --gradle-version 8.9
+
           fi
+
+          chmod +x ./gradlew
+
+          echo "===== Gradle Wrapper ====="
+          cat gradle/wrapper/gradle-wrapper.properties
+
+          echo "===== Gradle Version ====="
+          ./gradlew --version
+
+      - name: Fix Java and Kotlin JVM targets
+        shell: bash
+        run: |
+          set -e
+
+          BUILD_FILE="$PROJECT_DIR/app/build.gradle"
+
+          if [ ! -f "$BUILD_FILE" ]; then
+            echo "ERROR: app/build.gradle not found"
+            exit 1
+          fi
+
+          python3 - "$BUILD_FILE" <<'PY'
+          import sys
+          import re
+
+          path = sys.argv[1]
+
+          with open(path, "r", encoding="utf-8") as f:
+              text = f.read()
+
+          # Fix old Java targets
+          text = text.replace(
+              "JavaVersion.VERSION_1_8",
+              "JavaVersion.VERSION_17"
+          )
+
+          text = text.replace(
+              "JavaVersion.VERSION_11",
+              "JavaVersion.VERSION_17"
+          )
+
+          # Fix old Kotlin JVM targets
+          text = text.replace(
+              'jvmTarget = "1.8"',
+              'jvmTarget = "17"'
+          )
+
+          text = text.replace(
+              "jvmTarget = '1.8'",
+              "jvmTarget = '17'"
+          )
+
+          text = text.replace(
+              'jvmTarget = "11"',
+              'jvmTarget = "17"'
+          )
+
+          text = text.replace(
+              "jvmTarget = '11'",
+              "jvmTarget = '17'"
+          )
+
+          # Add Java 17 compile options if they do not exist
+          if "compileOptions" not in text and "android {" in text:
+              text = text.replace(
+                  "android {",
+                  """android {
+              compileOptions {
+                  sourceCompatibility JavaVersion.VERSION_17
+                  targetCompatibility JavaVersion.VERSION_17
+              }
+          """,
+                  1
+              )
+
+          # Add Kotlin 17 configuration if not already present
+          if "jvmTarget = " not in text:
+              text += """
+
+          tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile).configureEach {
+              kotlinOptions {
+                  jvmTarget = "17"
+              }
+          }
+          """
+
+          with open(path, "w", encoding="utf-8") as f:
+              f.write(text)
+
+          print("Java/Kotlin JVM target fixed to 17.")
+          PY
+
+          echo "===== Final app/build.gradle ====="
+          cat "$BUILD_FILE"
 
       - name: Build APK
         shell: bash
@@ -109,15 +187,14 @@ jobs:
 
           ./gradlew clean assembleDebug \
             --no-daemon \
-            --stacktrace \
-            --init-script force-jvm.gradle
+            --stacktrace
 
       - name: Find APK
         shell: bash
         run: |
           set -e
 
-          echo "Searching for APK..."
+          echo "===== APK FILES ====="
 
           find "$PROJECT_DIR/app/build/outputs/apk" \
             -type f \
@@ -129,4 +206,4 @@ jobs:
         with:
           name: Moodeoa-Smart-APK
           path: ${{ env.PROJECT_DIR }}/app/build/outputs/apk/**/*.apk
-          if-no-files-found: error
+          if-no-files-found:
