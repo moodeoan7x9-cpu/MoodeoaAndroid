@@ -28,11 +28,6 @@ jobs:
             cp -r $TARGET/. .
           fi
 
-      - name: Force Java 17 Target for Kotlin
-        run: |
-          find . -name "build.gradle*" -exec sed -i 's/jvmTarget = .*/jvmTarget = "17"/g' {} +
-          find . -name "build.gradle*" -exec sed -i 's/JavaVersion.VERSION_1_8/JavaVersion.VERSION_17/g' {} +
-
       - name: Setup Gradle Wrapper
         run: gradle wrapper
 
@@ -40,7 +35,7 @@ jobs:
         run: chmod +x gradlew
 
       - name: Build APK with Gradle
-        run: ./gradlew assembleDebug --stacktrace
+        run: ./gradlew assembleDebug -Pandroid.injected.build.model.only=false -Dorg.gradle.java.home=$JAVA_HOME --stacktrace
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
